@@ -1,0 +1,22 @@
+# Sandboxes and temporary test runs
+sandboxes/
+*.patch
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.env
+
+# Secrets & Environment variables
+.env*
+watsonx_creds.json
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
