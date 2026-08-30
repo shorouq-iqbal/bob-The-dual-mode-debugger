@@ -1,0 +1,7 @@
+ibm-watsonx-ai
+pytest
+rich>=13
+typer>=0.9
+fastapi
+uvicorn[standard]
+sse-starlette

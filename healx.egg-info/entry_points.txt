@@ -1,0 +1,2 @@
+[console_scripts]
+heal-x = healx_cli:app
