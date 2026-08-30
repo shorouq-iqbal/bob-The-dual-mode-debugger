@@ -158,10 +158,24 @@ def triage(repo_dir: str, test_name: str, progress_cb=None) -> tuple[str, list[b
 # MODE A: Closed-Loop Debugger
 # ---------------------------------------------------------------------------
 
-def run_debug_loop(test_name: str, repo_path: str = _DEFAULT_REPO, event_cb=None) -> dict:
-    error_context = run_test(repo_path, test_name)["output"]
+def _sanitise_traceback(text: str, repo_path: str) -> str:
+    """Remove sandbox/absolute paths from traceback so Granite only sees
+    clean relative paths — prevents hallucinations about module names."""
+    import re as _re
+    # Remove everything up to and including the repo root in any path
+    repo_norm = repo_path.replace("\\", "/")
+    text = text.replace(repo_norm, "<repo>")
+    text = text.replace(repo_path, "<repo>")
+    # Remove .healx sandbox noise entirely
+    text = _re.sub(r'[^\s"\']*\.healx[/\\][^\s"\']*', "<sandbox>", text)
+    return text
 
-    target_files = extract_failing_files(error_context, repo_path)
+
+def run_debug_loop(test_name: str, repo_path: str = _DEFAULT_REPO, event_cb=None) -> dict:
+    raw_output = run_test(repo_path, test_name)["output"]
+    error_context = _sanitise_traceback(raw_output, repo_path)
+
+    target_files = extract_failing_files(raw_output, repo_path)
     if not target_files:
         # Fallback: pick the first non-test .py file in repo root
         for f in sorted(os.listdir(repo_path)):
@@ -171,8 +185,8 @@ def run_debug_loop(test_name: str, repo_path: str = _DEFAULT_REPO, event_cb=None
     if not target_files:
         target_files = ["dummy.py"]
 
-    target_file   = target_files[0]
-    source_context = _read(os.path.join(repo_path, target_file))
+    target_file    = target_files[0]
+    original_source = _read(os.path.join(repo_path, target_file))
 
     if event_cb:
         event_cb("mode_a_start", {"target_file": target_file})
@@ -182,6 +196,9 @@ def run_debug_loop(test_name: str, repo_path: str = _DEFAULT_REPO, event_cb=None
     for i in range(1, MAX_DEBUG_ATTEMPTS + 1):
         if event_cb:
             event_cb("attempt", {"attempt": i, "max": MAX_DEBUG_ATTEMPTS})
+
+        # Always diagnose against the ORIGINAL source, not a previous bad patch
+        source_context = _read(os.path.join(repo_path, target_file))
 
         try:
             diagnosis  = watsonx_client.diagnose_failure(error_context, source_context)
@@ -229,8 +246,8 @@ def run_debug_loop(test_name: str, repo_path: str = _DEFAULT_REPO, event_cb=None
                 "stress_passes": stress_passes, "stress_total": STRESS_RUNS,
             }
 
-        error_context  = result["output"]
-        source_context = patch_code          # feed updated source into next attempt
+        # Sanitise sandbox traceback for next Granite call
+        error_context = _sanitise_traceback(result["output"], repo_path)
         cleanup_sandbox(sandbox)
 
     return {"success": False, "mode": "A", "diff": "", "diagnosis": "All attempts exhausted."}
