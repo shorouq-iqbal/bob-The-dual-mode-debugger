@@ -5,9 +5,14 @@ Drop-in module that wires IBM watsonx.ai (Granite models) into HealX.
 """
 
 import os
+import warnings
 import concurrent.futures
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
+
+# Suppress the noisy "max_tokens was set to 1024" warning from watsonx SDK
+warnings.filterwarnings("ignore", category=UserWarning, module="ibm_watsonx_ai")
+warnings.filterwarnings("ignore", message=".*max_tokens.*", category=Warning)
 
 # Credentials are resolved lazily on first use so that importing this
 # module (e.g. for --help) never crashes when env vars are absent.
@@ -68,14 +73,21 @@ def _strip_code_fences(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+# Max tokens to request — set explicitly to avoid the SDK warning
+_MAX_TOKENS = 1024
+
+
 def _chat(model_id: str, system_prompt: str, user_content: str) -> str:
     model = _get_model(model_id)
-    response = model.chat(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        response = model.chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            params={"max_new_tokens": _MAX_TOKENS},
+        )
     return response["choices"][0]["message"]["content"]
 
 

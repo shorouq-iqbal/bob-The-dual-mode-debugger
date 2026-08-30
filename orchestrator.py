@@ -53,7 +53,8 @@ def _sandbox_root(repo_path: str) -> str:
 def run_test(repo_dir: str, test_name: str) -> dict:
     env = os.environ.copy()
     env["PYTHONPATH"] = repo_dir
-    cmd = ["pytest", test_name, "-q", "--tb=short"]
+    env["PYTHONWARNINGS"] = "ignore"
+    cmd = ["pytest", test_name, "-q", "--tb=short", "-W", "ignore"]
     result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True, env=env)
     return {
         "passed": result.returncode == 0,
