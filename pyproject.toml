@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "healx"
+version = "0.1.0"
+description = "HealX — Autonomous AI Debugger powered by IBM Granite via watsonx.ai"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ibm-watsonx-ai",
+    "pytest",
+    "rich>=13",
+    "typer>=0.9",
+    "fastapi",
+    "uvicorn[standard]",
+    "sse-starlette",
+]
+
+[project.scripts]
+heal-x = "healx_cli:app"

@@ -2,20 +2,18 @@
 healx_cli.py — Rich/Typer CLI for HealX Autonomous Debugger.
 
 Usage:
-    python healx_cli.py run [TEST_PATH]
-    python healx_cli.py run tests/test_deterministic_bug.py
+    python healx_cli.py [TEST_PATH]
+    python healx_cli.py --repo /path/to/project tests/test_foo.py
+    heal-x tests/test_deterministic_bug.py          (after pip install -e .)
 """
 
 import os
-import sys
-import time
 import threading
 from datetime import datetime
 
 import typer
 from rich import box
 from rich.align import Align
-from rich.columns import Columns
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -25,110 +23,161 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
+
+# ---------------------------------------------------------------------------
+# IBM-branded color theme
+# ---------------------------------------------------------------------------
+HEALX_THEME = Theme({
+    "pass":      "bold #3fb950",
+    "fail":      "bold #f85149",
+    "pending":   "dim #8b949e",
+    "analyzing": "bold #e3b341",
+    "granite":   "bold #58a6ff",
+    "info":      "#58a6ff",
+    "muted":     "dim #8b949e",
+    "banner":    "bold #1f6feb",
+    "success":   "bold #3fb950",
+    "error":     "bold #f85149",
+})
 
 app = typer.Typer(
     help="HealX — Autonomous AI Debugger powered by IBM Granite",
     invoke_without_command=True,
     no_args_is_help=False,
 )
-console = Console()
+console = Console(theme=HEALX_THEME)
 
-BANNER = (
-    "HH   HH EEEEE   AAA   LL      XX   XX\n"
-    "HH   HH EE     AA AA  LL       XX XX \n"
-    "HHHHHHH EEEEE AAAAAAA LL        XXX  \n"
-    "HH   HH EE   AA   AA  LL       XX XX \n"
-    "HH   HH EEEEE AA   AA LLLLLLL XX   XX"
-)
-
-GRANITE_BADGE = "[bold cyan]IBM Granite[/bold cyan] [dim]via watsonx.ai[/dim]"
+# ---------------------------------------------------------------------------
+# Banner
+# ---------------------------------------------------------------------------
+_BANNER_LINES = [
+    (" ██╗  ██╗███████╗ █████╗ ██╗     ██╗  ██╗", "#1f6feb"),
+    (" ██║  ██║██╔════╝██╔══██╗██║     ╚██╗██╔╝", "#2979d4"),
+    (" ███████║█████╗  ███████║██║      ╚███╔╝ ", "#388bfd"),
+    (" ██╔══██║██╔══╝  ██╔══██║██║      ██╔██╗ ", "#4d9cf7"),
+    (" ██║  ██║███████╗██║  ██║███████╗██╔╝ ██╗", "#58a6ff"),
+    (" ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝", "#79c0ff"),
+]
 
 
 def print_banner():
+    banner_text = Text()
+    for line, color in _BANNER_LINES:
+        banner_text.append(line + "\n", style=f"bold {color}")
+
+    subtitle = Text()
+    subtitle.append("Powered by ", style="dim")
+    subtitle.append("IBM Granite", style="granite")
+    subtitle.append(" · ", style="dim")
+    subtitle.append("watsonx.ai", style="info")
+
     console.print()
     console.print(Panel(
-        Align.center(
-            Text(BANNER.strip(), style="bold blue") 
-        ),
-        subtitle=GRANITE_BADGE,
-        border_style="blue",
-        padding=(0, 4),
+        Align.center(banner_text),
+        subtitle=Align.center(subtitle),
+        border_style="banner",
+        padding=(0, 6),
     ))
     console.print()
 
 
+# ---------------------------------------------------------------------------
+# Table builders
+# ---------------------------------------------------------------------------
+
 def build_triage_table(results: list) -> Table:
-    t = Table(title="Triage Results", box=box.ROUNDED, border_style="blue", show_header=True)
+    t = Table(title="[granite]Triage Results[/granite]", box=box.ROUNDED,
+              border_style="info", show_header=True, header_style="muted")
     t.add_column("Run", style="bold", justify="center", width=6)
-    t.add_column("Status", justify="center", width=12)
+    t.add_column("Status", justify="center", width=14)
     for i, passed in enumerate(results, 1):
-        icon = "[green]● PASS[/green]" if passed else "[red]● FAIL[/red]"
-        t.add_row(str(i), icon)
+        status = "[pass]● PASS[/pass]" if passed else "[fail]● FAIL[/fail]"
+        t.add_row(str(i), status)
     return t
 
 
 def build_subagent_table(statuses: dict) -> Table:
-    t = Table(title="Parallel Subagent Race (IBM Granite)", box=box.SIMPLE_HEAVY, border_style="cyan")
-    t.add_column("Subagent", style="bold", width=14)
-    t.add_column("Hypothesis", width=26)
-    t.add_column("Status", justify="center", width=14)
+    t = Table(
+        title="[granite]Parallel Subagent Race · IBM Granite[/granite]",
+        box=box.SIMPLE_HEAVY, border_style="granite",
+        header_style="muted",
+    )
+    t.add_column("Subagent",   style="bold",  width=16)
+    t.add_column("Hypothesis", style="muted", width=28)
+    t.add_column("Status",     justify="center", width=16)
 
     icons = {
-        "PENDING": "[dim]⏳ PENDING[/dim]",
-        "ANALYZING": "[yellow]🔬 ANALYZING[/yellow]",
-        "PASSED": "[green]✅ PASSED[/green]",
-        "FAILED": "[red]❌ FAILED[/red]",
+        "PENDING":   "[pending]○ PENDING[/pending]",
+        "ANALYZING": "[analyzing]◎ ANALYZING[/analyzing]",
+        "PASSED":    "[pass]✓ PASSED[/pass]",
+        "FAILED":    "[fail]✗ FAILED[/fail]",
     }
     hypotheses = {
-        "timing": "Unmocked sleep / async",
-        "state": "Shared global state leak",
+        "timing":     "Unmocked sleep / async",
+        "state":      "Shared global state leak",
         "randomness": "Unseeded random generator",
     }
     for kind in ["timing", "state", "randomness"]:
         status = statuses.get(kind, "PENDING")
-        t.add_row(f"🧠 {kind.capitalize()}", hypotheses[kind], icons.get(status, status))
+        t.add_row(
+            f"[granite]▸[/granite] {kind.capitalize()}",
+            hypotheses[kind],
+            icons.get(status, status),
+        )
     return t
 
+
+# ---------------------------------------------------------------------------
+# Main command
+# ---------------------------------------------------------------------------
 
 @app.command()
 def run(
     test_path: str = typer.Argument(
         os.path.join("tests", "test_deterministic_bug.py"),
-        help="Relative path to the pytest test file inside sample_repo/",
+        help="Relative path to the pytest test file inside the target repo.",
+    ),
+    repo: str = typer.Option(
+        None,
+        "--repo", "-r",
+        help="Path to the target repository root. Defaults to current directory.",
     ),
     no_report: bool = typer.Option(False, "--no-report", help="Skip writing Markdown report"),
 ):
     """Run HealX on the given test path and autonomously fix the bug."""
-    # Import orchestrator lazily so missing env vars don't crash --help
-    import importlib, sys
-
-    # Ensure watsonx_client is loaded with deferred credential validation
     import orchestrator
     import reporter
 
+    # Resolve repo path: --repo flag > CWD
+    repo_path = os.path.abspath(repo) if repo else os.getcwd()
+
     print_banner()
-    console.print(Rule("[bold blue]Starting HealX Run[/bold blue]"))
-    console.print(f"  [dim]Target:[/dim] [cyan]{test_path}[/cyan]")
-    console.print(f"  [dim]Time:  [/dim] [cyan]{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/cyan]")
+    console.print(Rule("[banner]Starting HealX Run[/banner]"))
+    console.print(f"  [muted]Repo:  [/muted] [info]{repo_path}[/info]")
+    console.print(f"  [muted]Target:[/muted] [info]{test_path}[/info]")
+    console.print(f"  [muted]Time:  [/muted] [info]{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/info]")
     console.print()
 
     # ---- TRIAGE PHASE ----
-    console.print(Rule("[bold yellow]Phase 1 — Triage[/bold yellow]"))
+    console.print(Rule("[analyzing]Phase 1 — Triage[/analyzing]"))
     triage_results = []
-    verdict = None
 
     with Progress(
-        SpinnerColumn(),
+        SpinnerColumn(style="granite"),
         TextColumn("[bold]{task.description}"),
-        BarColumn(bar_width=30),
+        BarColumn(bar_width=30, style="info", complete_style="pass"),
         TextColumn("{task.completed}/{task.total}"),
         TimeElapsedColumn(),
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task(f"Running triage ({orchestrator.TRIAGE_RUNS}x)...", total=orchestrator.TRIAGE_RUNS)
+        task = progress.add_task(
+            f"Running triage ({orchestrator.TRIAGE_RUNS}x)...",
+            total=orchestrator.TRIAGE_RUNS,
+        )
         for _ in range(orchestrator.TRIAGE_RUNS):
-            passed = orchestrator.run_test(orchestrator.REPO_PATH, test_path)["passed"]
+            passed = orchestrator.run_test(repo_path, test_path)["passed"]
             triage_results.append(passed)
             progress.advance(task)
 
@@ -142,31 +191,31 @@ def run(
     console.print()
 
     verdict_labels = {
-        "MODE_A": ("[bold red]DETERMINISTIC BUG[/bold red]", "Routing to Mode A — Debug Loop"),
-        "MODE_B": ("[bold yellow]FLAKY TEST[/bold yellow]", "Routing to Mode B — FlakyGuard"),
-        "NO_BUG": ("[bold green]NO BUG DETECTED[/bold green]", "All tests passing. Nothing to fix."),
+        "MODE_A": ("[fail]DETERMINISTIC BUG[/fail]",   "Routing to Mode A — Debug Loop"),
+        "MODE_B": ("[analyzing]FLAKY TEST[/analyzing]", "Routing to Mode B — FlakyGuard"),
+        "NO_BUG": ("[pass]NO BUG DETECTED[/pass]",      "All tests passing. Nothing to fix."),
     }
     label, desc = verdict_labels.get(verdict, (verdict, ""))
-    console.print(Panel(f"  Classification: {label}\n  {desc}", border_style="yellow"))
+    console.print(Panel(
+        f"  Classification: {label}\n  [muted]{desc}[/muted]",
+        border_style="analyzing",
+        padding=(0, 2),
+    ))
     console.print()
 
     if verdict == "NO_BUG":
-        console.print("[bold green]✓ No issues found. HealX run complete.[/bold green]")
+        console.print("[pass]✓ No issues found. HealX run complete.[/pass]")
         return
 
-    # ---- MODE A ----
     result = {}
     subagent_statuses = {"timing": "PENDING", "state": "PENDING", "randomness": "PENDING"}
 
+    # ---- MODE A ----
     if verdict == "MODE_A":
-        console.print(Rule("[bold red]Phase 2 — Mode A: Debug Loop[/bold red]"))
+        console.print(Rule("[fail]Phase 2 — Mode A: Debug Loop[/fail]"))
 
         diagnosis_text = ""
         diff_text = ""
-
-        # Event sink for live updates
-        live_table_holder = {}
-        lock = threading.Lock()
 
         def on_event(kind, data):
             nonlocal diagnosis_text, diff_text
@@ -175,53 +224,54 @@ def run(
             elif kind == "attempt_result":
                 diff_text = data.get("diff", "")
 
-        with console.status("[bold cyan]🤖 IBM Granite diagnosing failure...[/bold cyan]", spinner="dots"):
-            result = orchestrator.run_debug_loop(test_path, event_cb=on_event)
+        with console.status(
+            "[granite]IBM Granite diagnosing failure...[/granite]", spinner="dots"
+        ):
+            result = orchestrator.run_debug_loop(test_path, repo_path=repo_path, event_cb=on_event)
 
         if diagnosis_text:
             console.print(Panel(
                 Markdown(f"**IBM Granite Root-Cause Analysis**\n\n{diagnosis_text}"),
-                border_style="cyan",
-                title="[bold cyan]Granite Diagnosis[/bold cyan]",
+                border_style="granite",
+                title="[granite]Granite Diagnosis[/granite]",
             ))
             console.print()
 
         if diff_text:
-            console.print(Rule("[bold green]Code Diff Applied[/bold green]"))
+            console.print(Rule("[pass]Code Diff Applied[/pass]"))
             console.print(Syntax(diff_text, "diff", theme="monokai", line_numbers=False))
             console.print()
 
     # ---- MODE B ----
     elif verdict == "MODE_B":
-        console.print(Rule("[bold yellow]Phase 2 — Mode B: FlakyGuard[/bold yellow]"))
-        console.print("[dim]Dispatching 3 IBM Granite subagents in parallel...[/dim]\n")
+        console.print(Rule("[analyzing]Phase 2 — Mode B: FlakyGuard[/analyzing]"))
+        console.print("[muted]Dispatching 3 IBM Granite subagents in parallel...[/muted]\n")
 
         with Live(build_subagent_table(subagent_statuses), console=console, refresh_per_second=4) as live:
             def on_event(kind, data):
                 if kind == "subagent_status":
-                    k = data["kind"]
-                    subagent_statuses[k] = data["status"]
+                    subagent_statuses[data["kind"]] = data["status"]
                     live.update(build_subagent_table(subagent_statuses))
 
-            result = orchestrator.run_flakyguard(test_path, event_cb=on_event)
+            result = orchestrator.run_flakyguard(test_path, repo_path=repo_path, event_cb=on_event)
 
         console.print()
         if result.get("diff"):
-            console.print(Rule("[bold green]Winning Fix Diff[/bold green]"))
+            console.print(Rule("[pass]Winning Fix Diff[/pass]"))
             console.print(Syntax(result["diff"], "diff", theme="monokai"))
             console.print()
 
     # ---- STRESS VERIFICATION ----
     stress_passes = result.get("stress_passes", 0)
-    stress_total = result.get("stress_total", 0)
+    stress_total  = result.get("stress_total",  0)
 
     if stress_total:
-        console.print(Rule("[bold blue]Final Stress Verification[/bold blue]"))
+        console.print(Rule("[banner]Final Stress Verification[/banner]"))
         with Progress(
-            SpinnerColumn(),
+            SpinnerColumn(style="granite"),
             TextColumn("[bold]{task.description}"),
-            BarColumn(bar_width=40),
-            TextColumn("[green]{task.completed}[/] / {task.total} passed"),
+            BarColumn(bar_width=40, style="info", complete_style="pass"),
+            TextColumn("[pass]{task.completed}[/pass] / {task.total} passed"),
             TimeElapsedColumn(),
             console=console,
         ) as progress:
@@ -229,25 +279,28 @@ def run(
             progress.update(task, completed=stress_passes)
 
         pct = int(100 * stress_passes / stress_total) if stress_total else 0
-        console.print(f"\n  [bold]Pass rate:[/bold] [{'green' if pct == 100 else 'yellow'}]{stress_passes}/{stress_total} ({pct}%)[/]")
+        color = "pass" if pct == 100 else "analyzing"
+        console.print(
+            f"\n  [bold]Pass rate:[/bold] [{color}]{stress_passes}/{stress_total} ({pct}%)[/{color}]"
+        )
         console.print()
 
     # ---- RESULT SUMMARY ----
     console.print(Rule())
     if result.get("success"):
         console.print(Panel(
-            "[bold green]✅  HealX Successfully Fixed the Bug![/bold green]\n\n"
-            f"Fix applied to: [cyan]{result.get('target_file', test_path)}[/cyan]\n"
-            f"Mode used: [bold]{result.get('mode', verdict)}[/bold]",
-            border_style="green",
-            title="[bold green]RUN COMPLETE[/bold green]",
+            "[pass]✓  HealX Successfully Fixed the Bug![/pass]\n\n"
+            f"  [muted]Fix applied to:[/muted] [info]{result.get('target_file', test_path)}[/info]\n"
+            f"  [muted]Mode used:[/muted]      [bold]{result.get('mode', verdict)}[/bold]",
+            border_style="pass",
+            title="[pass]RUN COMPLETE[/pass]",
         ))
     else:
         console.print(Panel(
-            "[bold red]❌  HealX could not fully verify a fix.[/bold red]\n"
-            f"Diagnosis: {result.get('diagnosis', 'N/A')}",
-            border_style="red",
-            title="[bold red]RUN FAILED[/bold red]",
+            "[fail]✗  HealX could not fully verify a fix.[/fail]\n\n"
+            f"  [muted]Diagnosis:[/muted] {result.get('diagnosis', 'N/A')}",
+            border_style="fail",
+            title="[fail]RUN FAILED[/fail]",
         ))
 
     # ---- REPORT ----
@@ -258,7 +311,9 @@ def run(
             verdict=verdict,
             result=result,
         )
-        console.print(f"\n  [dim]📄 Audit report saved to:[/dim] [cyan]{report_path}[/cyan]")
+        console.print(
+            f"\n  [muted]Audit report:[/muted] [info]{report_path}[/info]"
+        )
     console.print()
 
 
