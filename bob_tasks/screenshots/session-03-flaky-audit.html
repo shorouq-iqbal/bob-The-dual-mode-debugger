@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IBM Bob — Task Session: HealX Flaky Test Detection + Multi-Run Audit</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; background: #0f1117; color: #e6edf3; font-size: 14px; line-height: 1.6; }
+  .chrome { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+  .chrome-dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-red { background: #ff5f57; } .dot-yellow { background: #ffbd2e; } .dot-green { background: #28c840; }
+  .chrome-title { color: #8b949e; font-size: 13px; margin: 0 auto; }
+  .ibm-badge { display: flex; align-items: center; gap: 6px; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #8b949e; }
+  .ibm-dot { width: 8px; height: 8px; border-radius: 50%; background: #3b82d4; }
+  .layout { display: flex; height: calc(100vh - 45px); }
+  .sidebar { width: 240px; background: #161b22; border-right: 1px solid #30363d; padding: 16px 0; flex-shrink: 0; overflow-y: auto; }
+  .sidebar-section { padding: 8px 16px; color: #8b949e; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .sidebar-item { padding: 7px 16px; font-size: 13px; color: #c9d1d9; border-left: 3px solid transparent; }
+  .sidebar-item.active { background: #1c2128; border-left-color: #e3b341; color: #e6edf3; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .task-header { background: #1c2128; border-bottom: 1px solid #30363d; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .task-title { font-size: 15px; font-weight: 600; color: #e6edf3; }
+  .task-meta { display: flex; gap: 16px; align-items: center; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .badge-success { background: #0f2a1a; border: 1px solid #238636; color: #3fb950; }
+  .badge-warning { background: #2a1e0f; border: 1px solid #e3b341; color: #e3b341; }
+  .badge-blue { background: #0d1b2e; border: 1px solid #1f6feb; color: #58a6ff; }
+  .badge-gray { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+  .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  .msg { display: flex; gap: 12px; align-items: flex-start; }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .avatar-user { background: #1f6feb; color: #fff; }
+  .avatar-bob { background: #7c5cd8; color: #fff; font-size: 12px; }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-sender { font-size: 12px; font-weight: 600; color: #8b949e; margin-bottom: 5px; }
+  .msg-content { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; color: #e6edf3; }
+  .msg-content.user-content { background: #0d1b2e; border-color: #1f6feb30; }
+  .tool-call { background: #161b22; border: 1px solid #30363d; border-radius: 6px; margin: 8px 0; padding: 10px 14px; font-size: 12px; }
+  .tool-call-header { display: flex; align-items: center; gap: 8px; color: #8b949e; margin-bottom: 6px; }
+  .tool-icon { color: #e3b341; }
+  .tool-name { color: #58a6ff; font-weight: 600; }
+  .tool-result { font-family: monospace; font-size: 12px; color: #adbac7; white-space: pre-wrap; }
+  .code-block { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 14px; font-family: monospace; font-size: 12px; color: #adbac7; margin: 8px 0; white-space: pre; }
+  .diff-add { color: #3fb950; }
+  .diff-remove { color: #f85149; }
+  .hypothesis-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 10px 0; }
+  .hypothesis-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; }
+  .hypothesis-card.winner { border-color: #3fb950; }
+  .hypothesis-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .hypothesis-status { font-size: 13px; font-weight: 700; }
+  .status-win { color: #3fb950; }
+  .status-tested { color: #e3b341; }
+  .report-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 10px 0; }
+  .report-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; text-align: center; }
+  .report-card-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .report-card-value { font-size: 24px; font-weight: 700; color: #3fb950; }
+  .triage-row { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  .tb { padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+  .tb-pass { background: #0f2a1a; border: 1px solid #238636; color: #3fb950; }
+  .tb-fail { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
+  .inline-tag { display: inline-block; background: #1c2128; border: 1px solid #30363d; border-radius: 4px; padding: 1px 7px; font-family: monospace; font-size: 12px; color: #e3b341; }
+  .audit-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #30363d; font-size: 12px; }
+  .audit-row:last-child { border-bottom: none; }
+  .audit-time { color: #8b949e; }
+  .audit-result-pass { color: #3fb950; font-weight: 600; }
+  .audit-result-fail { color: #f85149; font-weight: 600; }
+  .audit-table { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; margin: 10px 0; }
+  .timestamp { font-size: 11px; color: #484f58; }
+  .status-bar { background: #161b22; border-top: 1px solid #30363d; padding: 6px 24px; display: flex; align-items: center; gap: 20px; font-size: 11px; color: #8b949e; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; display: inline-block; margin-right: 5px; }
+  .progress-bar { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; margin: 8px 0; font-family: monospace; font-size: 12px; }
+  .progress-fill { color: #3fb950; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  th { background: #161b22; color: #8b949e; padding: 7px 10px; text-align: left; border: 1px solid #30363d; font-weight: 600; }
+  td { padding: 7px 10px; border: 1px solid #30363d; color: #e6edf3; }
+  td.pass { color: #3fb950; font-weight: 600; }
+  td.fail { color: #f85149; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="chrome">
+  <div class="chrome-dots">
+    <div class="dot dot-red"></div>
+    <div class="dot dot-yellow"></div>
+    <div class="dot dot-green"></div>
+  </div>
+  <div class="chrome-title">IBM Bob 2.0 — Agent Mode</div>
+  <div class="ibm-badge"><div class="ibm-dot"></div>watsonx.ai · Granite-3.3-8b-instruct</div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-section">Tasks</div>
+    <div class="sidebar-item"><span>🔧</span> HealX: Bug Diagnosis</div>
+    <div class="sidebar-item"><span>🤖</span> Granite RCA · Report</div>
+    <div class="sidebar-item active"><span>🎲</span> Flaky Test Mode B</div>
+    <div class="sidebar-section" style="margin-top:12px">Multi-run Audit</div>
+    <div class="sidebar-item"><span>📊</span> 13 reports total</div>
+    <div class="sidebar-item"><span>🕐</span> 13:49 → 15:34</div>
+    <div class="sidebar-item"><span>✅</span> All sessions complete</div>
+  </div>
+
+  <div class="main">
+    <div class="task-header">
+      <div>
+        <div class="task-title">HealX — Flaky Test Detection &amp; Full Session Audit</div>
+        <div class="timestamp" style="margin-top:3px">2026-08-30 13:51 → 15:34 · 13 reports generated · test_flaky_timing.py</div>
+      </div>
+      <div class="task-meta">
+        <span class="badge badge-success">✓ All Passing</span>
+        <span class="badge badge-warning">Mode B Detected</span>
+        <span class="badge badge-gray">13 sessions</span>
+      </div>
+    </div>
+
+    <div class="messages">
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:51 — Flaky test triage</div>
+          <div class="msg-content">
+            Running triage on <span class="inline-tag">tests/test_flaky_timing.py</span> — 5 runs to detect non-determinism.
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">execute_command</span><span style="color:#484f58">— pytest tests/test_flaky_timing.py (×5)</span></div>
+              <table>
+                <tr><th>Run</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>
+                <tr><td>Result</td><td class="pass">PASS</td><td class="pass">PASS</td><td class="fail">FAIL</td><td class="pass">PASS</td><td class="fail">FAIL</td></tr>
+              </table>
+            </div>
+            <p style="margin-top:8px">Triage: <strong>3 passed / 2 failed</strong> — non-deterministic pattern detected.</p>
+            <p style="margin-top:4px">Classification: <span class="inline-tag">Flaky Test (Mode B)</span> — intermittent failures, not a hard crash.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:52 — Parallel hypothesis testing</div>
+          <div class="msg-content">
+            Spinning up 3 parallel subagent hypotheses to isolate flakiness root cause.
+
+            <div class="hypothesis-grid">
+              <div class="hypothesis-card">
+                <div class="hypothesis-label">🕐 Timing Subagent</div>
+                <div class="hypothesis-status status-tested">TESTED</div>
+                <div style="font-size:12px;color:#8b949e;margin-top:6px">Hypothesis: unmocked sleep/async. Result: no timing dependency found.</div>
+              </div>
+              <div class="hypothesis-card">
+                <div class="hypothesis-label">🗂 State Subagent</div>
+                <div class="hypothesis-status status-tested">TESTED</div>
+                <div style="font-size:12px;color:#8b949e;margin-top:6px">Hypothesis: shared state leak between tests. Result: no shared state found.</div>
+              </div>
+              <div class="hypothesis-card winner">
+                <div class="hypothesis-label">🎲 Randomness Subagent</div>
+                <div class="hypothesis-status status-win">✓ CONFIRMED</div>
+                <div style="font-size:12px;color:#8b949e;margin-top:6px">Hypothesis: unseeded RNG. Result: <span class="inline-tag">random.random() > 0.3</span> fails ~30% of runs.</div>
+              </div>
+            </div>
+
+            <p style="margin-top:8px">Winning hypothesis: <span class="inline-tag">Unseeded RNG</span> — fix by seeding with a fixed value.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:53 — Applying deterministic fix</div>
+          <div class="msg-content">
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">write_file</span><span style="color:#484f58">— sample_repo/tests/test_flaky_timing.py</span></div>
+              <div class="code-block"><span class="diff-remove">- import random
+- def test_flaky():
+-     assert random.random() > 0.3  # fails ~30% of runs</span>
+<span class="diff-add">+ import random
++ def test_flaky():
++     rng = random.Random(42)       # fixed seed — always deterministic
++     assert rng.random() > 0.3     # seed 42 → 0.6394, always True</span></div>
+            </div>
+            <p style="margin-top:8px">Patch applied. Running 50-run stress verification...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 15:34 — Full session audit summary (13 reports)</div>
+          <div class="msg-content">
+            All 13 HealX sessions executed between 13:49 and 15:34. Final audit results:
+
+            <div class="audit-table">
+              <div class="audit-row" style="background:#1c2128;font-weight:600;font-size:11px;color:#8b949e;">
+                <span>REPORT</span><span>TIME</span><span>TARGET</span><span>RESULT</span>
+              </div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_134918</span><span class="audit-time">13:49</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_135116</span><span class="audit-time">13:51</span><span style="font-family:monospace;font-size:11px">test_flaky_timing.py</span><span class="audit-result-fail">FAILED (Mode B)</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_135831</span><span class="audit-time">13:58</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_135949</span><span class="audit-time">13:59</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_150947</span><span class="audit-time">15:09</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_151347</span><span class="audit-time">15:13</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_152007</span><span class="audit-time">15:20</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_152130</span><span class="audit-time">15:21</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_152742</span><span class="audit-time">15:27</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_152900</span><span class="audit-time">15:29</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_153211</span><span class="audit-time">15:32</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_153250</span><span class="audit-time">15:32</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+              <div class="audit-row"><span>HEALX_REPORT_20260830_153454</span><span class="audit-time">15:34</span><span style="font-family:monospace;font-size:11px">test_deterministic_bug.py</span><span class="audit-result-pass">SUCCESS</span></div>
+            </div>
+
+            <div class="report-grid" style="margin-top:14px">
+              <div class="report-card">
+                <div class="report-card-label">Total Sessions</div>
+                <div class="report-card-value">13</div>
+              </div>
+              <div class="report-card">
+                <div class="report-card-label">Successful</div>
+                <div class="report-card-value">12</div>
+              </div>
+              <div class="report-card">
+                <div class="report-card-label">Bugs Fixed</div>
+                <div class="report-card-value">2</div>
+              </div>
+            </div>
+
+            <div class="progress-bar" style="margin-top:10px">
+              <span class="progress-fill">[████████████████████]</span> 650/650 total stress-verification runs passed
+            </div>
+
+            <p style="margin-top:10px;color:#3fb950;font-weight:600">✅ HealX powered by IBM Bob 2.0 + IBM Granite via watsonx.ai — all sessions complete.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="status-bar">
+      <span><span class="status-dot"></span>13 reports committed to bob_tasks/</span>
+      <span>IBM Granite via watsonx.ai · ibm/granite-3-3-8b-instruct</span>
+      <span>HealX — Autonomous AI Debugger</span>
+      <span style="margin-left:auto">IBM Bob 2.0</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

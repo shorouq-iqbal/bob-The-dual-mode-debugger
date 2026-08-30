@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IBM Bob — Task Session: HealX Granite Root-Cause Analysis</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; background: #0f1117; color: #e6edf3; font-size: 14px; line-height: 1.6; }
+  .chrome { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+  .chrome-dots { display: flex; gap: 6px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot-red { background: #ff5f57; } .dot-yellow { background: #ffbd2e; } .dot-green { background: #28c840; }
+  .chrome-title { color: #8b949e; font-size: 13px; margin: 0 auto; }
+  .ibm-badge { display: flex; align-items: center; gap: 6px; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 12px; color: #8b949e; }
+  .ibm-dot { width: 8px; height: 8px; border-radius: 50%; background: #3b82d4; }
+  .layout { display: flex; height: calc(100vh - 45px); }
+  .sidebar { width: 240px; background: #161b22; border-right: 1px solid #30363d; padding: 16px 0; flex-shrink: 0; overflow-y: auto; }
+  .sidebar-section { padding: 8px 16px; color: #8b949e; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .sidebar-item { padding: 7px 16px; font-size: 13px; color: #c9d1d9; border-left: 3px solid transparent; }
+  .sidebar-item.active { background: #1c2128; border-left-color: #7c5cd8; color: #e6edf3; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .task-header { background: #1c2128; border-bottom: 1px solid #30363d; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .task-title { font-size: 15px; font-weight: 600; color: #e6edf3; }
+  .task-meta { display: flex; gap: 16px; align-items: center; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .badge-success { background: #0f2a1a; border: 1px solid #238636; color: #3fb950; }
+  .badge-purple { background: #1a0f2e; border: 1px solid #7c5cd8; color: #a371f7; }
+  .badge-gray { background: #1c2128; border: 1px solid #30363d; color: #8b949e; }
+  .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+  .msg { display: flex; gap: 12px; align-items: flex-start; }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+  .avatar-user { background: #1f6feb; color: #fff; }
+  .avatar-bob { background: #7c5cd8; color: #fff; font-size: 12px; }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-sender { font-size: 12px; font-weight: 600; color: #8b949e; margin-bottom: 5px; }
+  .msg-content { background: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; color: #e6edf3; }
+  .msg-content.user-content { background: #0d1b2e; border-color: #1f6feb30; }
+  .granite-block { background: #1a0f2e; border: 1px solid #7c5cd8; border-radius: 8px; padding: 16px; margin: 10px 0; }
+  .granite-label { font-size: 11px; font-weight: 700; color: #a371f7; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .granite-label::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #7c5cd8; }
+  .granite-response { font-size: 13px; color: #cac8f7; line-height: 1.7; }
+  .tool-call { background: #161b22; border: 1px solid #30363d; border-radius: 6px; margin: 8px 0; padding: 10px 14px; font-size: 12px; }
+  .tool-call-header { display: flex; align-items: center; gap: 8px; color: #8b949e; margin-bottom: 6px; }
+  .tool-icon { color: #e3b341; }
+  .tool-name { color: #58a6ff; font-weight: 600; }
+  .tool-result { font-family: monospace; font-size: 12px; color: #adbac7; white-space: pre-wrap; }
+  .code-block { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 14px; font-family: monospace; font-size: 12px; color: #adbac7; margin: 8px 0; white-space: pre; }
+  .diff-add { color: #3fb950; }
+  .diff-remove { color: #f85149; }
+  .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+  .report-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
+  .report-card-label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .report-card-value { font-size: 22px; font-weight: 700; color: #3fb950; }
+  .report-card-value.fail { color: #f85149; }
+  .triage-row { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  .triage-badge { padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+  .triage-pass { background: #0f2a1a; border: 1px solid #238636; color: #3fb950; }
+  .triage-fail { background: #2a0f0f; border: 1px solid #f85149; color: #f85149; }
+  .progress-bar { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; margin: 8px 0; font-family: monospace; font-size: 12px; }
+  .progress-fill { color: #3fb950; }
+  .inline-tag { display: inline-block; background: #1c2128; border: 1px solid #30363d; border-radius: 4px; padding: 1px 7px; font-family: monospace; font-size: 12px; color: #e3b341; }
+  .timestamp { font-size: 11px; color: #484f58; }
+  .status-bar { background: #161b22; border-top: 1px solid #30363d; padding: 6px 24px; display: flex; align-items: center; gap: 20px; font-size: 11px; color: #8b949e; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; display: inline-block; margin-right: 5px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  th { background: #161b22; color: #8b949e; padding: 7px 10px; text-align: left; border: 1px solid #30363d; font-weight: 600; }
+  td { padding: 7px 10px; border: 1px solid #30363d; color: #e6edf3; }
+  td.pass { color: #3fb950; font-weight: 600; }
+  td.fail { color: #f85149; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="chrome">
+  <div class="chrome-dots">
+    <div class="dot dot-red"></div>
+    <div class="dot dot-yellow"></div>
+    <div class="dot dot-green"></div>
+  </div>
+  <div class="chrome-title">IBM Bob 2.0 — Agent Mode</div>
+  <div class="ibm-badge"><div class="ibm-dot"></div>watsonx.ai · Granite-3.3-8b-instruct</div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-section">Tasks</div>
+    <div class="sidebar-item"><span>🔧</span> HealX: Bug Diagnosis</div>
+    <div class="sidebar-item active"><span>🤖</span> Granite RCA · Report</div>
+    <div class="sidebar-item"><span>✅</span> HealX: Stress Verify</div>
+    <div class="sidebar-section" style="margin-top:12px">Session</div>
+    <div class="sidebar-item"><span>📊</span> 13 reports generated</div>
+    <div class="sidebar-item"><span>🧠</span> IBM Granite LLM</div>
+    <div class="sidebar-item"><span>☁️</span> watsonx.ai us-south</div>
+  </div>
+
+  <div class="main">
+    <div class="task-header">
+      <div>
+        <div class="task-title">HealX — Granite Root-Cause Analysis · HEALX_REPORT_20260830_134918</div>
+        <div class="timestamp" style="margin-top:3px">2026-08-30 13:49:18 · Test target: tests/test_deterministic_bug.py</div>
+      </div>
+      <div class="task-meta">
+        <span class="badge badge-success">✓ SUCCESS</span>
+        <span class="badge badge-purple">IBM Granite RCA</span>
+        <span class="badge badge-gray">50/50 passed</span>
+      </div>
+    </div>
+
+    <div class="messages">
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:47</div>
+          <div class="msg-content">
+            Running triage — executing test suite 5 times to classify bug type.
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">execute_command</span><span style="color:#484f58">— pytest tests/test_deterministic_bug.py (×5)</span></div>
+              <table>
+                <tr><th>Run</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr>
+                <tr><td>Result</td><td class="fail">FAIL</td><td class="fail">FAIL</td><td class="fail">FAIL</td><td class="fail">FAIL</td><td class="fail">FAIL</td></tr>
+              </table>
+            </div>
+            <p style="margin-top:8px">Triage complete: <strong>0 passed / 5 failed</strong></p>
+            <p style="margin-top:4px">Classification: <span class="inline-tag">Deterministic Bug (Mode A)</span> — fails every run, not flaky.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:48 — Calling IBM Granite via watsonx.ai</div>
+          <div class="msg-content">
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">watsonx_client.generate()</span><span style="color:#484f58">— ibm/granite-3-3-8b-instruct</span></div>
+              <div class="tool-result">Prompt: Analyze this Python traceback and source code. Identify the root cause.
+Traceback: AssertionError: assert 6 == 5
+Source: def add(a, b): return a + b + 1
+→ Sending to watsonx.ai us-south.ml.cloud.ibm.com ...</div>
+            </div>
+
+            <div class="granite-block">
+              <div class="granite-label">IBM Granite 3.3 — Root-Cause Analysis</div>
+              <div class="granite-response">
+                The root cause of the test failure is in the <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">add</code> function definition.<br><br>
+                The problem is on line 2:<br>
+                <div class="code-block" style="margin:8px 0">def add(a, b):
+    return a + b + 1</div>
+                The <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">add</code> function is incorrectly adding an extra <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">1</code> to the result of <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">a + b</code>. This causes the assertion <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">assert add(2, 3) == 5</code> to fail, because <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">add(2, 3)</code> returns <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">6</code> instead of the expected value of <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">5</code>.<br><br>
+                The issue lies in the <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">return</code> statement — the spurious <code style="background:#2a1a4e;padding:1px 5px;border-radius:3px;font-family:monospace">+ 1</code> part should be removed to fix the bug.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="msg-avatar avatar-bob">B</div>
+        <div class="msg-body">
+          <div class="msg-sender">IBM Bob (HealX Agent) · 13:49 — Applying patch &amp; stress verification</div>
+          <div class="msg-content">
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">apply_diff</span><span style="color:#484f58">— sample_repo/dummy.py</span></div>
+              <div class="code-block"><span class="diff-remove">- def add(a, b):
+-     return a + b + 1</span>
+<span class="diff-add">+ def add(a, b):
++     return a + b</span></div>
+            </div>
+
+            <div class="tool-call">
+              <div class="tool-call-header"><span class="tool-icon">🔧</span><span class="tool-name">execute_command</span><span style="color:#484f58">— pytest tests/ -v (stress: 50 runs)</span></div>
+              <div class="tool-result" style="color:#3fb950">50/50 PASSED · 0 failures</div>
+            </div>
+
+            <div class="report-grid">
+              <div class="report-card">
+                <div class="report-card-label">Runs Executed</div>
+                <div class="report-card-value">50</div>
+              </div>
+              <div class="report-card">
+                <div class="report-card-label">Runs Passed</div>
+                <div class="report-card-value">50</div>
+              </div>
+              <div class="report-card">
+                <div class="report-card-label">Pass Rate</div>
+                <div class="report-card-value">100%</div>
+              </div>
+              <div class="report-card">
+                <div class="report-card-label">Overall Result</div>
+                <div class="report-card-value">SUCCESS</div>
+              </div>
+            </div>
+
+            <div class="progress-bar">
+              <span class="progress-fill">[████████████████████]</span> 50/50 passed
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="status-bar">
+      <span><span class="status-dot"></span>Report generated: HEALX_REPORT_20260830_134918.md</span>
+      <span>IBM Granite via watsonx.ai · ibm/granite-3-3-8b-instruct</span>
+      <span style="margin-left:auto">IBM Bob 2.0 · HealX Autonomous Debugger</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>
