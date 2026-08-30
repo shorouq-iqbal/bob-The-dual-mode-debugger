@@ -66,7 +66,7 @@ def print_banner():
     for line, color in _BANNER_LINES:
         banner_text.append(line + "\n", style=f"bold {color}")
 
-    subtitle = Text()
+    subtitle = Text(justify="center")
     subtitle.append("Powered by ", style="dim")
     subtitle.append("IBM Granite", style="granite")
     subtitle.append(" · ", style="dim")
@@ -75,7 +75,7 @@ def print_banner():
     console.print()
     console.print(Panel(
         Align.center(banner_text),
-        subtitle=Align.center(subtitle),
+        subtitle=subtitle,
         border_style="banner",
         padding=(0, 6),
     ))
@@ -252,6 +252,10 @@ def run(
                 if kind == "subagent_status":
                     subagent_statuses[data["kind"]] = data["status"]
                     live.update(build_subagent_table(subagent_statuses))
+                elif kind == "subagent_debug":
+                    live.console.print(
+                        f"  [fail][debug {data['kind']}] pytest: {data['output'][:200]}[/fail]"
+                    )
 
             result = orchestrator.run_flakyguard(test_path, repo_path=repo_path, event_cb=on_event)
 

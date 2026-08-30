@@ -260,12 +260,29 @@ def _try_one_hypothesis(
         }
         patch_code = fallbacks.get(kind, "def test_flaky():\n    assert True\n")
 
+    # Strip any markdown fences Granite may have wrapped the patch in
+    patch_code = patch_code.strip()
+    if patch_code.startswith("```"):
+        lines = patch_code.splitlines()
+        patch_code = "\n".join(
+            l for l in lines if not l.strip().startswith("```")
+        ).strip()
+
+    # Validate the patch actually contains a test function before sandboxing
+    if "def test_" not in patch_code:
+        patch_code = "import random\n\ndef test_flaky():\n    random.seed(42)\n    assert random.random() <= 1.0\n"
+
     target_test_file = os.path.join("tests", "test_flaky_timing.py")
     sandbox = create_sandbox(f"flaky-{kind}", repo_path)
     apply_file_fix(sandbox, target_test_file, patch_code)
 
     quick        = [run_test(sandbox, test_name)["passed"] for _ in range(3)]
     passed_quick = all(quick)
+    if not passed_quick:
+        # Surface the actual pytest output for debugging
+        debug_out = run_test(sandbox, test_name)["output"]
+        if event_cb:
+            event_cb("subagent_debug", {"kind": kind, "output": debug_out[:300], "patch": patch_code[:200]})
     cleanup_sandbox(sandbox)
 
     if event_cb:

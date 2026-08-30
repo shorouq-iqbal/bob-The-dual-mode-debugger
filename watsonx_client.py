@@ -101,33 +101,44 @@ def generate_patch(diagnosis: str, source_context: str) -> str:
     return _strip_code_fences(raw)
 
 
+_CODE_ONLY = (
+    " Output ONLY valid Python source code for the complete fixed test file."
+    " Do NOT include explanations, prose, or markdown fences."
+    " The output must be directly runnable by pytest as-is."
+)
+
 SUBAGENT_PROMPTS = {
     "timing": (
         "You are a debugging subagent specialized in TIMING issues. "
         "Inspect the test and source code for unmocked sleep calls, "
         "timeouts, or async race conditions. Propose a fix that removes "
-        "the timing dependency (e.g. mock the clock, await the right "
-        "event, add a deterministic wait). Output ONLY the corrected code."
+        "the timing dependency (e.g. mock the clock, add a deterministic wait)."
+        + _CODE_ONLY
     ),
     "state": (
         "You are a debugging subagent specialized in SHARED STATE issues. "
         "Inspect the test and source code for mutated global fixtures or "
         "cross-test state pollution. Propose a fix that isolates state "
-        "properly (e.g. fixture scoping, teardown, deep copies). Output "
-        "ONLY the corrected code."
+        "properly (e.g. fixture scoping, teardown, deep copies)."
+        + _CODE_ONLY
     ),
     "randomness": (
         "You are a debugging subagent specialized in NON-DETERMINISM. "
         "Inspect the test and source code for unseeded random generators "
-        "or non-deterministic timestamps. Propose a fix that seeds or "
-        "mocks the source of randomness. Output ONLY the corrected code."
+        "or non-deterministic behaviour. Seed or mock the randomness source "
+        "so the test always passes deterministically."
+        + _CODE_ONLY
     ),
 }
 
 
 def run_subagent(kind: str, test_code: str, source_context: str) -> dict:
     system_prompt = SUBAGENT_PROMPTS[kind]
-    user_content = f"TEST CODE:\n{test_code}\n\nSOURCE CONTEXT:\n{source_context}"
+    user_content = (
+        f"TEST CODE:\n{test_code}\n\n"
+        f"SOURCE CONTEXT:\n{source_context}\n\n"
+        "Return ONLY the complete fixed Python test file. No explanations."
+    )
     raw = _chat(SUBAGENT_MODEL_ID, system_prompt, user_content)
     return {"kind": kind, "patch": _strip_code_fences(raw)}
 
