@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "healx"
@@ -20,3 +20,14 @@ dependencies = [
 
 [project.scripts]
 heal-x = "healx_cli:app"
+
+[tool.setuptools]
+# This project is script-only — no importable package to discover.
+py-modules = [
+    "healx_cli",
+    "orchestrator",
+    "watsonx_client",
+    "reporter",
+    "app",
+    "run_demo",
+]
