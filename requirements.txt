@@ -1,0 +1,7 @@
+ibm-watsonx-ai
+pytest
+rich
+typer
+fastapi
+uvicorn[standard]
+sse-starlette

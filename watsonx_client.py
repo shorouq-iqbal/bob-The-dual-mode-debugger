@@ -2,21 +2,6 @@
 watsonx_client.py
 ------------------
 Drop-in module that wires IBM watsonx.ai (Granite models) into HealX.
-
-Replace whatever LLM client orchestrator.py currently imports with this
-module. It exposes one function per HealX reasoning step:
-
-    1. diagnose_failure()   -> Mode A: root-cause diagnosis from a traceback
-    2. generate_patch()     -> Mode A: proposed code fix
-    3. run_subagent()       -> Mode B: one of the 3 parallel hypothesis agents
-    4. run_subagents_parallel() -> Mode B: races all 3 subagents concurrently
-
-Setup:
-    pip install ibm-watsonx-ai
-
-    export WATSONX_API_KEY="..."      # from the hackathon portal
-    export WATSONX_PROJECT_ID="..."   # from the hackathon portal
-    export WATSONX_URL="https://us-south.ml.cloud.ibm.com"  # region-specific
 """
 
 import os
@@ -24,30 +9,63 @@ import concurrent.futures
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 
-# ---------------------------------------------------------------------------
-# Config — pull from env vars so credentials never get hardcoded/committed
-# ---------------------------------------------------------------------------
+# Credentials are resolved lazily on first use so that importing this
+# module (e.g. for --help) never crashes when env vars are absent.
+_CREDENTIALS = None
+_PROJECT_ID = None
 
-CREDENTIALS = Credentials(
-    api_key=os.environ["WATSONX_API_KEY"],
-    url=os.environ.get("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
-)
-PROJECT_ID = os.environ["WATSONX_PROJECT_ID"]
 
-# Swap this once you confirm which Granite variants are available on your
-# provisioned project (run list(api_client.foundation_models.ChatModels) to check).
-# A "*_CODE" variant, if available, is preferable for patch generation.
-DIAGNOSIS_MODEL_ID = "ibm/granite-3-3-8b-instruct"
-PATCH_MODEL_ID = "ibm/granite-3-3-8b-instruct"
-SUBAGENT_MODEL_ID = "ibm/granite-3-3-8b-instruct"
+def _get_credentials():
+    global _CREDENTIALS, _PROJECT_ID
+    if _CREDENTIALS is None:
+        api_key = os.environ.get("WATSONX_API_KEY")
+        project_id = os.environ.get("WATSONX_PROJECT_ID")
+        if not api_key:
+            raise EnvironmentError(
+                "WATSONX_API_KEY environment variable is not set.\n"
+                "Export it before running: set WATSONX_API_KEY=<your-key>"
+            )
+        if not project_id:
+            raise EnvironmentError(
+                "WATSONX_PROJECT_ID environment variable is not set.\n"
+                "Export it before running: set WATSONX_PROJECT_ID=<your-project-id>"
+            )
+        _CREDENTIALS = Credentials(
+            api_key=api_key,
+            url=os.environ.get("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
+        )
+        _PROJECT_ID = project_id
+    return _CREDENTIALS, _PROJECT_ID
+
+# Confirmed working on this project's provisioning (2026-08-29).
+# granite-3-1-8b-base does NOT support chat (base/completion model only).
+# granite-guardian-3-8b is a safety/guardrail model, not for general reasoning.
+# granite-4-h-small is the only general-purpose instruct Granite chat model
+# available on this project -- use it everywhere.
+DIAGNOSIS_MODEL_ID = "ibm/granite-4-h-small"
+PATCH_MODEL_ID = "ibm/granite-4-h-small"
+SUBAGENT_MODEL_ID = "ibm/granite-4-h-small"
 
 
 def _get_model(model_id: str) -> ModelInference:
+    credentials, project_id = _get_credentials()
     return ModelInference(
         model_id=model_id,
-        credentials=CREDENTIALS,
-        project_id=PROJECT_ID,
+        credentials=credentials,
+        project_id=project_id,
     )
+
+
+def _strip_code_fences(text: str) -> str:
+    """Robustly strip markdown code fences regardless of language tag or
+    leading/trailing whitespace/newlines."""
+    text = text.strip()
+    lines = text.split("\n")
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 def _chat(model_id: str, system_prompt: str, user_content: str) -> str:
@@ -61,13 +79,7 @@ def _chat(model_id: str, system_prompt: str, user_content: str) -> str:
     return response["choices"][0]["message"]["content"]
 
 
-# ---------------------------------------------------------------------------
-# Mode A: Closed-Loop Debugger
-# ---------------------------------------------------------------------------
-
 def diagnose_failure(stack_trace: str, source_context: str) -> str:
-    """Given a pytest traceback + surrounding source, return a root-cause
-    diagnosis in plain language."""
     system_prompt = (
         "You are a senior debugging agent. Given a Python test failure "
         "traceback and the relevant source code, identify the precise "
@@ -79,19 +91,15 @@ def diagnose_failure(stack_trace: str, source_context: str) -> str:
 
 
 def generate_patch(diagnosis: str, source_context: str) -> str:
-    """Given a diagnosis, propose a concrete code patch."""
     system_prompt = (
         "You are a senior software engineer. Given a root-cause diagnosis "
         "and the relevant source code, output ONLY the corrected code block "
         "needed to fix the issue. No explanation, no markdown fences."
     )
     user_content = f"DIAGNOSIS:\n{diagnosis}\n\nSOURCE CONTEXT:\n{source_context}"
-    return _chat(PATCH_MODEL_ID, system_prompt, user_content)
+    raw = _chat(PATCH_MODEL_ID, system_prompt, user_content)
+    return _strip_code_fences(raw)
 
-
-# ---------------------------------------------------------------------------
-# Mode B: Parallel FlakyGuard subagents
-# ---------------------------------------------------------------------------
 
 SUBAGENT_PROMPTS = {
     "timing": (
@@ -118,17 +126,13 @@ SUBAGENT_PROMPTS = {
 
 
 def run_subagent(kind: str, test_code: str, source_context: str) -> dict:
-    """Run a single hypothesis subagent (kind = 'timing' | 'state' | 'randomness')."""
     system_prompt = SUBAGENT_PROMPTS[kind]
     user_content = f"TEST CODE:\n{test_code}\n\nSOURCE CONTEXT:\n{source_context}"
-    patch = _chat(SUBAGENT_MODEL_ID, system_prompt, user_content)
-    return {"kind": kind, "patch": patch}
+    raw = _chat(SUBAGENT_MODEL_ID, system_prompt, user_content)
+    return {"kind": kind, "patch": _strip_code_fences(raw)}
 
 
-def run_subagents_parallel(test_code: str, source_context: str) -> list[dict]:
-    """Race all 3 hypothesis subagents concurrently. Returns a list of
-    {kind, patch} dicts — feed each into your sandbox test runner and
-    keep the first one that passes the quick filter."""
+def run_subagents_parallel(test_code: str, source_context: str) -> list:
     kinds = ["timing", "state", "randomness"]
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = {

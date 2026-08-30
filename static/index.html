@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HealX — Autonomous AI Debugger</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .badge-pass  { background:#1a3a2a; color:#3fb950; border:1px solid #3fb950; }
+    .badge-fail  { background:#3a1a1a; color:#f85149; border:1px solid #f85149; }
+    .badge-pend  { background:#1c2230; color:#8b949e; border:1px solid #30363d; }
+    .badge-run   { background:#2a2010; color:#e3b341; border:1px solid #e3b341; }
+    .card        { background:#161b22; border:1px solid #30363d; border-radius:8px; }
+    .code-block  { background:#0d1117; border:1px solid #30363d; border-radius:6px;
+                   font-family:'Cascadia Code','Fira Code',monospace; font-size:12px; }
+    .add-line    { background:#0d2b0d; color:#3fb950; }
+    .del-line    { background:#2d0d0d; color:#f85149; }
+    .meta-line   { color:#8b949e; }
+    .spinner     { animation: spin 1s linear infinite; display:inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-bar-inner { transition: width 0.3s ease; background: linear-gradient(90deg,#1f6feb,#388bfd); border-radius:4px; }
+    .granite-glow { text-shadow: 0 0 18px #388bfd55; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+
+  <!-- Header -->
+  <div class="mb-8 text-center">
+    <div class="inline-flex items-center gap-3 mb-2">
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+        <circle cx="16" cy="16" r="15" stroke="#388bfd" stroke-width="2"/>
+        <path d="M10 22 L16 8 L22 22" stroke="#388bfd" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 18 L20 18" stroke="#388bfd" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <h1 class="text-4xl font-bold tracking-tight granite-glow" style="color:#388bfd">HealX</h1>
+    </div>
+    <p class="text-sm text-gray-500">Autonomous AI Debugger &amp; FlakyGuard &nbsp;·&nbsp;
+      <span style="color:#58a6ff">IBM Granite</span> via <span style="color:#58a6ff">watsonx.ai</span>
+    </p>
+  </div>
+
+  <!-- Control Bar -->
+  <div class="card p-4 mb-6 flex flex-wrap items-center gap-4">
+    <div class="flex-1 min-w-56">
+      <label class="block text-xs text-gray-500 mb-1">Test Path</label>
+      <input id="testPathInput" type="text"
+        value="tests/test_deterministic_bug.py"
+        class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+      />
+    </div>
+    <div class="flex gap-3 items-end">
+      <button id="runBtn" onclick="startRun()"
+        class="px-5 py-2 rounded font-semibold text-sm transition-all"
+        style="background:#1f6feb;color:#fff">
+        ▶ Run HealX Agent
+      </button>
+      <button onclick="resetUI()"
+        class="px-4 py-2 rounded font-semibold text-sm border border-gray-600 text-gray-400 hover:border-gray-400">
+        ↺ Reset
+      </button>
+    </div>
+    <div id="runStatus" class="text-sm text-gray-500 ml-auto"></div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- LEFT COLUMN -->
+    <div class="flex flex-col gap-6">
+
+      <!-- Triage Grid -->
+      <div class="card p-4">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Triage Grid <span class="text-gray-600">(5 runs)</span>
+        </h2>
+        <div id="triageGrid" class="flex gap-3 flex-wrap">
+          <span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run 1</span>
+          <span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run 2</span>
+          <span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run 3</span>
+          <span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run 4</span>
+          <span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run 5</span>
+        </div>
+        <div id="triageVerdict" class="mt-3 text-xs text-gray-500"></div>
+      </div>
+
+      <!-- Classification -->
+      <div class="card p-4">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Classification</h2>
+        <div id="classificationBadge" class="text-2xl font-bold text-gray-600">—</div>
+        <div id="classificationDesc" class="text-xs text-gray-500 mt-1"></div>
+      </div>
+
+      <!-- Subagent Race Board -->
+      <div class="card p-4" id="subagentSection" style="display:none">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Parallel Subagent Race &nbsp;·&nbsp; <span style="color:#58a6ff">IBM Granite</span>
+        </h2>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs text-gray-500 border-b border-gray-700">
+              <th class="text-left py-1 pr-4">Subagent</th>
+              <th class="text-left py-1 pr-4">Hypothesis</th>
+              <th class="text-left py-1">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr id="row-timing"><td class="py-2 pr-4 font-mono">🧠 Timing</td><td class="pr-4 text-gray-400 text-xs">Unmocked sleep / async</td><td id="status-timing"><span class="badge-pend px-2 py-0.5 rounded text-xs">PENDING</span></td></tr>
+            <tr id="row-state"><td class="py-2 pr-4 font-mono">🧠 State</td><td class="pr-4 text-gray-400 text-xs">Shared global state</td><td id="status-state"><span class="badge-pend px-2 py-0.5 rounded text-xs">PENDING</span></td></tr>
+            <tr id="row-randomness"><td class="py-2 pr-4 font-mono">🧠 Randomness</td><td class="pr-4 text-gray-400 text-xs">Unseeded RNG</td><td id="status-randomness"><span class="badge-pend px-2 py-0.5 rounded text-xs">PENDING</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Diagnosis -->
+      <div class="card p-4" id="diagnosisSection" style="display:none">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
+          IBM Granite Diagnosis
+        </h2>
+        <div id="diagnosisText" class="text-sm text-gray-300 leading-relaxed"></div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="flex flex-col gap-6">
+
+      <!-- Diff Card -->
+      <div class="card p-4" id="diffSection" style="display:none">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Code Diff Applied</h2>
+        <div class="code-block p-3 overflow-x-auto max-h-72 overflow-y-auto">
+          <pre id="diffContent" class="text-xs"></pre>
+        </div>
+      </div>
+
+      <!-- Verification Progress -->
+      <div class="card p-4" id="verifySection" style="display:none">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Stress Verification
+        </h2>
+        <div class="flex items-center justify-between text-xs text-gray-400 mb-2">
+          <span id="verifyLabel">Initialising...</span>
+          <span id="verifyCount">0 / 0</span>
+        </div>
+        <div class="w-full h-3 bg-gray-800 rounded overflow-hidden">
+          <div id="progressBar" class="progress-bar-inner h-full" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="card p-4 flex-1">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Activity Log</h2>
+        <div id="activityLog" class="code-block p-3 text-xs text-gray-400 overflow-y-auto" style="max-height:340px; min-height:100px"></div>
+      </div>
+
+      <!-- Result Banner -->
+      <div id="resultBanner" style="display:none"></div>
+
+      <!-- Report Link -->
+      <div id="reportLink" style="display:none" class="text-center text-sm"></div>
+
+    </div>
+  </div>
+
+  <footer class="text-center text-xs text-gray-600 mt-10 border-t border-gray-800 pt-4">
+    HealX &nbsp;·&nbsp; IBM Granite via watsonx.ai &nbsp;·&nbsp; IBM Hackathon 2026
+  </footer>
+
+<script>
+  let evtSource = null;
+
+  function log(msg, cls='text-gray-400') {
+    const el = document.getElementById('activityLog');
+    const ts = new Date().toLocaleTimeString();
+    el.innerHTML += `<div class="${cls}">[${ts}] ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function resetUI() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    document.getElementById('triageGrid').innerHTML = [1,2,3,4,5].map(i =>
+      `<span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run ${i}</span>`).join('');
+    document.getElementById('triageVerdict').textContent = '';
+    document.getElementById('classificationBadge').innerHTML = '—';
+    document.getElementById('classificationBadge').className = 'text-2xl font-bold text-gray-600';
+    document.getElementById('classificationDesc').textContent = '';
+    document.getElementById('subagentSection').style.display = 'none';
+    document.getElementById('diagnosisSection').style.display = 'none';
+    document.getElementById('diffSection').style.display = 'none';
+    document.getElementById('verifySection').style.display = 'none';
+    document.getElementById('resultBanner').style.display = 'none';
+    document.getElementById('reportLink').style.display = 'none';
+    document.getElementById('activityLog').innerHTML = '';
+    document.getElementById('runStatus').textContent = '';
+    document.getElementById('runBtn').disabled = false;
+    document.getElementById('runBtn').style.opacity = '1';
+    ['timing','state','randomness'].forEach(k => {
+      document.getElementById(`status-${k}`).innerHTML =
+        '<span class="badge-pend px-2 py-0.5 rounded text-xs">PENDING</span>';
+    });
+  }
+
+  function setSubagentStatus(kind, status) {
+    const map = {
+      PENDING: '<span class="badge-pend px-2 py-0.5 rounded text-xs">PENDING</span>',
+      ANALYZING: '<span class="badge-run px-2 py-0.5 rounded text-xs"><span class="spinner">⟳</span> ANALYZING</span>',
+      PASSED: '<span class="badge-pass px-2 py-0.5 rounded text-xs">✓ PASSED</span>',
+      FAILED: '<span class="badge-fail px-2 py-0.5 rounded text-xs">✗ FAILED</span>',
+    };
+    const el = document.getElementById(`status-${kind}`);
+    if (el) el.innerHTML = map[status] || status;
+  }
+
+  function renderDiff(diff) {
+    const lines = diff.split('\n');
+    const html = lines.map(line => {
+      const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (line.startsWith('+++') || line.startsWith('---')) return `<span class="meta-line">${esc}</span>`;
+      if (line.startsWith('@@')) return `<span class="meta-line text-blue-400">${esc}</span>`;
+      if (line.startsWith('+')) return `<span class="add-line">${esc}</span>`;
+      if (line.startsWith('-')) return `<span class="del-line">${esc}</span>`;
+      return `<span>${esc}</span>`;
+    }).join('\n');
+    document.getElementById('diffContent').innerHTML = html;
+    document.getElementById('diffSection').style.display = '';
+  }
+
+  function startRun() {
+    resetUI();
+    const testPath = document.getElementById('testPathInput').value.trim();
+    document.getElementById('runBtn').disabled = true;
+    document.getElementById('runBtn').style.opacity = '0.5';
+    document.getElementById('runStatus').innerHTML = '<span class="spinner">⟳</span> Running...';
+    log(`Starting HealX run: <span class="text-blue-400">${testPath}</span>`);
+
+    fetch('/api/trigger', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({test_path: testPath})
+    }).then(r => r.json()).then(data => {
+      if (data.status === 'busy') {
+        log('⚠ Another run is already in progress.', 'text-yellow-400');
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('runBtn').style.opacity = '1';
+        return;
+      }
+      subscribeSSE();
+    }).catch(e => log(`Error: ${e}`, 'text-red-400'));
+  }
+
+  function subscribeSSE() {
+    evtSource = new EventSource('/api/stream');
+    evtSource.onmessage = function(e) {
+      const msg = JSON.parse(e.data);
+      handleEvent(msg.type, msg.data);
+    };
+    evtSource.onerror = function() {
+      log('SSE connection error — run may have completed.', 'text-yellow-400');
+    };
+  }
+
+  function handleEvent(type, data) {
+    switch(type) {
+
+      case 'triage_start':
+        log(`Triage started for <span class="text-blue-400">${data.test_path}</span>`);
+        break;
+
+      case 'triage_update': {
+        const grid = document.getElementById('triageGrid');
+        const results = data.results;
+        grid.innerHTML = results.map((r, i) =>
+          `<span class="${r ? 'badge-pass' : 'badge-fail'} px-3 py-1 rounded text-xs font-mono">
+            ${r ? '✓' : '✗'} Run ${i+1}
+          </span>`
+        ).join('') + [1,2,3,4,5].slice(results.length).map((_, i) =>
+          `<span class="badge-pend px-3 py-1 rounded text-xs font-mono">Run ${results.length+i+1}</span>`
+        ).join('');
+        break;
+      }
+
+      case 'mode_routed': {
+        const v = data.verdict;
+        const badge = document.getElementById('classificationBadge');
+        const desc = document.getElementById('classificationDesc');
+        if (v === 'MODE_A') {
+          badge.innerHTML = '<span style="color:#f85149">⬤ DETERMINISTIC BUG</span>';
+          desc.textContent = 'Consistent failure → Mode A: Debug Loop';
+        } else if (v === 'MODE_B') {
+          badge.innerHTML = '<span style="color:#e3b341">⬤ FLAKY TEST</span>';
+          desc.textContent = 'Inconsistent results → Mode B: FlakyGuard';
+          document.getElementById('subagentSection').style.display = '';
+        } else {
+          badge.innerHTML = '<span style="color:#3fb950">⬤ NO BUG</span>';
+          desc.textContent = 'All tests passing.';
+        }
+        log(`Classification: ${v}`, v==='MODE_A'?'text-red-400':v==='MODE_B'?'text-yellow-400':'text-green-400');
+        break;
+      }
+
+      case 'subagent_status':
+        setSubagentStatus(data.kind, data.status);
+        log(`Subagent [${data.kind}] → ${data.status}`);
+        break;
+
+      case 'diagnosis':
+        document.getElementById('diagnosisText').textContent = data.text;
+        document.getElementById('diagnosisSection').style.display = '';
+        log('IBM Granite diagnosis received.', 'text-blue-400');
+        break;
+
+      case 'attempt':
+        log(`Debug attempt ${data.attempt}/${data.max}...`);
+        break;
+
+      case 'attempt_result':
+        log(`Attempt ${data.attempt}: ${data.passed ? '✓ PASSED' : '✗ FAILED'}`,
+          data.passed ? 'text-green-400' : 'text-yellow-400');
+        if (data.diff) renderDiff(data.diff);
+        break;
+
+      case 'diff_ready':
+        renderDiff(data.diff);
+        log('Code diff ready.', 'text-green-400');
+        break;
+
+      case 'stress_progress': {
+        const { current, total, passes } = data;
+        const pct = Math.round(100 * current / total);
+        document.getElementById('verifySection').style.display = '';
+        document.getElementById('verifyLabel').textContent = 'Stress verifying fix...';
+        document.getElementById('verifyCount').textContent = `${passes} / ${total} passed`;
+        document.getElementById('progressBar').style.width = pct + '%';
+        break;
+      }
+
+      case 'completed': {
+        document.getElementById('runStatus').textContent = '';
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('runBtn').style.opacity = '1';
+        if (evtSource) { evtSource.close(); evtSource = null; }
+        const banner = document.getElementById('resultBanner');
+        if (data.success) {
+          banner.innerHTML = `<div class="card border-green-700 p-4 text-center">
+            <div class="text-2xl font-bold text-green-400 mb-1">✅ Bug Fixed Successfully</div>
+            <div class="text-sm text-gray-400">${data.stress_passes ?? '?'}/${data.stress_total ?? '?'} stress runs passed</div>
+          </div>`;
+        } else {
+          banner.innerHTML = `<div class="card border-red-700 p-4 text-center">
+            <div class="text-2xl font-bold text-red-400 mb-1">❌ Could Not Fully Verify Fix</div>
+          </div>`;
+        }
+        banner.style.display = '';
+        if (data.report_path) {
+          document.getElementById('reportLink').innerHTML =
+            `<a href="/api/report/${data.report_path}" target="_blank"
+               class="underline" style="color:#58a6ff">📄 Download Audit Report</a>`;
+          document.getElementById('reportLink').style.display = '';
+        }
+        log(`Run completed. Success: ${data.success}`, data.success?'text-green-400':'text-red-400');
+        break;
+      }
+
+      case 'error':
+        log(`❌ Error: ${data.message}`, 'text-red-400');
+        document.getElementById('runStatus').textContent = '';
+        document.getElementById('runBtn').disabled = false;
+        document.getElementById('runBtn').style.opacity = '1';
+        break;
+    }
+  }
+</script>
+</body>
+</html>
