@@ -1,6 +1,11 @@
 import random
+import pytest
 
-
-def test_flaky():
+@pytest.fixture
+def deterministic_random():
     random.seed(0)
-    assert random.random() > 0.3
+    yield random
+    random.seed(None)
+
+def test_deterministic(deterministic_random):
+    assert deterministic_random.random() > 0.3
