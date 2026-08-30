@@ -4,5 +4,4 @@
 .pytest_cache/
 sandboxes/
 .healx/
-HEALX_REPORT_*.md
-bob-task-*.md
+
